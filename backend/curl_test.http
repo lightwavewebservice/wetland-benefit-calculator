@@ -1,0 +1,3 @@
+GET https://maps.es.govt.nz/image/rest/services/LiDAR/Southland_2021_2023_NZVD2016_DEM/ImageServer?f=json
+
+GET https://maps.es.govt.nz/image/rest/services/Imagery/ImageCache2023/MapServer?f=json
