@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Tooltip, Typography } from '@mui/material';
+import { Tooltip, Typography, Collapse, Paper, Divider, Box } from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import axios from 'axios';
 import Plot from 'react-plotly.js';
 import MapPanel from './map.jsx';
@@ -23,6 +25,110 @@ const defaultParams = {
     nitrogen: 0.4,
     phosphorus: 0.5
   }
+};
+
+const CalculationsInfo = () => {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <Paper className="mt-6 p-6 bg-white rounded-lg shadow-sm border border-slate-200">
+      <div 
+        className="flex items-center justify-between cursor-pointer"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <h3 className="text-xl font-semibold text-slate-800">Calculations & Methodology</h3>
+        {expanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+      </div>
+      
+      <Collapse in={expanded}>
+        <div className="mt-4 space-y-6">
+          {/* Sediment Calculation */}
+          <div>
+            <h4 className="text-lg font-medium text-slate-700 mb-2">1. Sediment Reduction Calculation</h4>
+            <div className="bg-slate-50 p-4 rounded-md">
+              <p className="text-sm text-slate-700 mb-2">
+                <strong>Formula:</strong> Sediment Reduction (kg/year) = A × R × K × LS × (C₁ × P₁ - C₂ × P₂) × SDR × 10
+              </p>
+              <ul className="list-disc pl-5 space-y-1 text-sm text-slate-600">
+                <li><strong>A</strong>: Area (ha)</li>
+                <li><strong>R</strong>: Rainfall erosivity factor (MJ·mm·ha⁻¹·h⁻¹·year⁻¹)</li>
+                <li><strong>K</strong>: Soil erodibility factor (t·ha·h·ha⁻¹·MJ⁻¹·mm⁻¹)</li>
+                <li><strong>LS</strong>: Slope length and steepness factor (dimensionless)</li>
+                <nobr><strong>C₁, C₂</strong>: Cover management factors before and after (0-1)</nobr>
+                <li><strong>P₁, P₂</strong>: Support practice factors before and after (0-1)</li>
+                <li><strong>SDR</strong>: Sediment delivery ratio (0-1)</li>
+              </ul>
+              <p className="text-xs text-slate-500 mt-2">
+                <strong>Reference:</strong> Modified Universal Soil Loss Equation (MUSLE), Williams (1975)
+              </p>
+            </div>
+          </div>
+
+          {/* Nitrogen Calculation */}
+          <div>
+            <h4 className="text-lg font-medium text-slate-700 mb-2">2. Nitrogen Reduction Calculation</h4>
+            <div className="bg-slate-50 p-4 rounded-md">
+              <p className="text-sm text-slate-700 mb-2">
+                <strong>Formula:</strong> Nitrogen Reduction (kg/year) = Sediment Reduction × N<sub>sed</sub> + Dissolved N Reduction
+              </p>
+              <p className="text-sm text-slate-700">
+                Where N<sub>sed</sub> is the nitrogen content in sediment (typically 0.05-0.2% by weight)
+              </p>
+              <p className="text-xs text-slate-500 mt-2">
+                <strong>References:</strong> Vollenweider (1968), Johnes (1996)
+              </p>
+            </div>
+          </div>
+
+          {/* Phosphorus Calculation */}
+          <div>
+            <h4 className="text-lg font-medium text-slate-700 mb-2">3. Phosphorus Reduction Calculation</h4>
+            <div className="bg-slate-50 p-4 rounded-md">
+              <p className="text-sm text-slate-700 mb-2">
+                <strong>Formula:</strong> Phosphorus Reduction (kg/year) = Sediment Reduction × P<sub>sed</sub> + Dissolved P Reduction
+              </p>
+              <p className="text-sm text-slate-700">
+                Where P<sub>sed</sub> is the phosphorus content in sediment (typically 0.02-0.1% by weight)
+              </p>
+              <p className="text-xs text-slate-500 mt-2">
+                <strong>References:</strong> Sharpley et al. (1994), McDowell et al. (2001)
+              </p>
+            </div>
+          </div>
+
+          {/* Wetland Efficiency */}
+          <div>
+            <h4 className="text-lg font-medium text-slate-700 mb-2">4. Wetland Treatment Efficiency</h4>
+            <div className="bg-slate-50 p-4 rounded-md">
+              <p className="text-sm text-slate-700 mb-2">
+                <strong>Typical Removal Efficiencies:</strong>
+              </p>
+              <ul className="list-disc pl-5 space-y-1 text-sm text-slate-600">
+                <li><strong>Total Suspended Solids (TSS):</strong> 60-90%</li>
+                <li><strong>Total Nitrogen (TN):</strong> 30-70%</li>
+                <li><strong>Total Phosphorus (TP):</strong> 40-80%</li>
+                <li><strong>Bacteria:</strong> 60-95%</li>
+              </ul>
+              <p className="text-xs text-slate-500 mt-2">
+                <strong>References:</strong> Kadlec & Wallace (2009), Environment Southland Wetland Guidelines
+              </p>
+            </div>
+          </div>
+
+          {/* Key Assumptions */}
+          <div>
+            <h4 className="text-lg font-medium text-slate-700 mb-2">Key Assumptions</h4>
+            <ul className="list-disc pl-5 space-y-1 text-sm text-slate-600">
+              <li>Calculations assume steady-state conditions</li>
+              <li>Efficiency values are based on established wetland performance data</li>
+              <li>Results are estimates and actual performance may vary based on site-specific conditions</li>
+              <li>Annual variations in rainfall and land use are not accounted for in this model</li>
+            </ul>
+          </div>
+        </div>
+      </Collapse>
+    </Paper>
+  );
 };
 
 const SummaryCard = ({ title, value, unit }) => (
@@ -325,12 +431,15 @@ function App() {
 
       <main className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-6 lg:flex-row">
         <section className="w-full lg:w-2/3">
-          <div className="h-[540px] overflow-hidden rounded-lg border border-slate-200 shadow">
-            <MapPanel
-              polygon={polygonGeoJSON}
-              onPolygonChange={handlePolygonChange}
-              benefitRasterUrl={rasterUrl}
-            />
+          <div className="space-y-4">
+            <div className="h-[500px] w-full rounded-lg overflow-hidden border border-slate-200">
+              <MapPanel
+                polygon={polygonGeoJSON}
+                onPolygonChange={handlePolygonChange}
+                benefitRasterUrl={rasterUrl}
+              />
+            </div>
+            <CalculationsInfo />
           </div>
         </section>
 
