@@ -1,8 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback, useContext, createContext } from 'react';
 import PropTypes from 'prop-types';
-import { MapContainer, TileLayer, FeatureGroup, LayersControl, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, FeatureGroup, LayersControl, useMap, WMSTileLayer } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
 import L from 'leaflet';
+import { Button, IconButton, Tooltip } from '@mui/material';
+import SettingsIcon from '@mui/icons-material/Settings';
+import AuthSettings from './components/AuthSettings';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-draw/dist/leaflet.draw.css';
 
@@ -25,48 +28,67 @@ L.Marker.prototype.options.icon = defaultIcon;
 // Default center for Southland, New Zealand
 const defaultCenter = [-46.142, 168.328];
 
-// Base map layers
-const baseLayers = {
-  'ESRI World Imagery': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+// Base map layer configurations
+const baseLayerConfigs = {
+  'ESRI World Imagery': {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
     maxZoom: 19
-  }),
-  'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  },
+  'OpenStreetMap': {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     attribution: '© OpenStreetMap contributors',
     maxZoom: 19
-  })
+  }
 };
 
-// Overlay layers
-const overlayLayers = {
-  'Southland Imagery 2023': L.tileLayer('https://maps.es.govt.nz/image/rest/services/Imagery/ImageCache2023/MapServer/tile/{z}/{y}/{x}', {
+// Overlay layer configurations
+const overlayLayerConfigs = [
+  {
+    name: 'Southland Imagery 2023',
+    type: 'wms',
+    url: 'https://maps.es.govt.nz/image/rest/services/Imagery/ImageCache2023/MapServer',
+    layers: '0',
+    format: 'image/png',
+    transparent: true,
     attribution: '© Environment Southland',
     maxZoom: 22,
     minZoom: 0,
-    bounds: [[-47.5, 166], [-45.5, 169]]
-  }),
-  'Slope': L.tileLayer('https://maps.es.govt.nz/image/rest/services/LiDAR/LiDAR_2021_2023_Southland_SLOPE/ImageServer/tile/{z}/{y}/{x}', {
-    attribution: '© Environment Southland LiDAR',
-    maxZoom: 22,
-    minZoom: 0,
-    bounds: [[-47.5, 166], [-45.5, 169]],
-    opacity: 0.7
-  }),
-  'Land Use': L.tileLayer('https://maps.es.govt.nz/server/rest/services/Public/Landuse/MapServer/tile/{z}/{y}/{x}', {
+    bounds: L.latLngBounds(L.latLng(-47.5, 166), L.latLng(-45.5, 169)),
+    opacity: 0.9,
+    zIndex: 10,
+    requiresAuth: true
+  },
+  {
+    name: 'Slope',
+    type: 'esri-image',
+    url: 'https://maps.es.govt.nz/server/rest/services/LiDAR/LiDAR_2021_2023_Southland_SLOPE/ImageServer/exportImage',
     attribution: '© Environment Southland',
     maxZoom: 22,
     minZoom: 0,
-    bounds: [[-47.5, 166], [-45.5, 169]],
-    opacity: 0.7
-  }),
-  'General Layers': L.tileLayer('https://maps.es.govt.nz/server/rest/services/Public/General/MapServer/tile/{z}/{y}/{x}', {
+    bounds: L.latLngBounds(L.latLng(-47.5, 166), L.latLng(-45.5, 169)),
+    opacity: 0.7,
+    zIndex: 5,
+    requiresAuth: true
+  },
+  {
+    name: 'Contours',
+    type: 'esri-feature',
+    url: 'https://maps.es.govt.nz/server/rest/services/BaseMaps/Contours/MapServer/0',
     attribution: '© Environment Southland',
-    maxZoom: 22,
+    maxZoom: 20,
     minZoom: 0,
-    bounds: [[-47.5, 166], [-45.5, 169]],
-    opacity: 0.7
-  })
-};
+    bounds: L.latLngBounds(L.latLng(-47.5, 166), L.latLng(-45.5, 169)),
+    opacity: 0.8,
+    zIndex: 2,
+    requiresAuth: true,
+    style: {
+      color: '#666666',
+      weight: 1,
+      opacity: 0.7
+    }
+  }
+];
 
 function PolygonSynchroniser({ polygon }) {
   const map = useMap();
@@ -171,10 +193,61 @@ BenefitRasterLayer.propTypes = {
   url: PropTypes.string
 };
 
+// Create auth context
+export const AuthContext = createContext({
+  credentials: null,
+  setCredentials: () => {}
+});
+
 function MapPanel({ polygon, onPolygonChange, benefitRasterUrl }) {
+  const [authOpen, setAuthOpen] = useState(false);
+  const [credentials, setCredentials] = useState(() => {
+    // Load saved credentials from localStorage
+    const saved = localStorage.getItem('esriAuth');
+    return saved ? JSON.parse(saved) : null;
+  });
+  
+  // Save credentials to localStorage when they change
+  useEffect(() => {
+    if (credentials) {
+      localStorage.setItem('esriAuth', JSON.stringify(credentials));
+    } else {
+      localStorage.removeItem('esriAuth');
+    }
+  }, [credentials]);
+  
+  // Check if any layer requires authentication
+  const hasAuthLayers = overlayLayerConfigs.some(layer => layer.requiresAuth);
+  const hasAuth = !!credentials;
+  
+  // Handle authentication save
+  const handleAuthSave = (newCredentials) => {
+    setCredentials(newCredentials);
+    // Here you would typically validate the credentials with the server
+    // and get an access token
+  };
+  
+  // Handle logout
+  const handleLogout = () => {
+    setCredentials(null);
+  };
   const mapRef = useRef(null);
   const featureGroupRef = useRef(null);
   const [map, setMap] = useState(null);
+  const layerControlRef = useRef(null);
+  const [mapError, setMapError] = useState(null);
+  
+  // Debug function to log layer events
+  const logLayerEvent = (eventName, layerName, error = null) => {
+    const timestamp = new Date().toISOString();
+    const message = `[${timestamp}] Layer Event - ${eventName}: ${layerName}`;
+    if (error) {
+      console.error(message, error);
+      setMapError(`${eventName} failed for ${layerName}: ${error.message}`);
+    } else {
+      console.log(message);
+    }
+  };
 
   // Handle polygon changes
   const handleCreated = useCallback((e) => {
@@ -194,9 +267,43 @@ function MapPanel({ polygon, onPolygonChange, benefitRasterUrl }) {
     });
   }, [onPolygonChange]);
 
-  // Initialize map when component mounts
+  // Initialize map and layers when component mounts
   useEffect(() => {
-    return;
+    if (!map) return;
+    
+    try {
+      logLayerEvent('Map initialized', 'Base Map');
+      
+      // Add event listeners for map errors
+      map.on('tileerror', (error) => {
+        console.error('Tile error:', error);
+        setMapError(`Failed to load map tiles: ${error.message || 'Unknown error'}`);
+      });
+      
+      // Log when tiles start loading
+      map.on('tileloadstart', (e) => {
+        const url = e.tile?.src || 'unknown';
+        console.log(`Loading tile from: ${url}`);
+      });
+      
+      // Log when tiles are loaded
+      map.on('tileload', (e) => {
+        const url = e.tile?.src || 'unknown';
+        console.log(`Successfully loaded tile from: ${url}`);
+      });
+      
+    } catch (error) {
+      logLayerEvent('Map initialization error', 'Base Map', error);
+    }
+    
+    return () => {
+      // Cleanup event listeners
+      if (map) {
+        map.off('tileerror');
+        map.off('tileloadstart');
+        map.off('tileload');
+      }
+    };
   }, [map]);
 
   // Draw options
@@ -228,54 +335,241 @@ function MapPanel({ polygon, onPolygonChange, benefitRasterUrl }) {
     },
   }), []);
 
+  // Function to render overlay layers with error boundaries
+  const renderOverlayLayers = () => {
+    try {
+      return overlayLayerConfigs.map((config) => {
+        try {
+          if (config.type === 'esri-image') {
+            return (
+              <LayersControl.Overlay 
+                key={`overlay-${config.name}`}
+                name={config.name}
+                checked={false}
+              >
+                <WMSTileLayer
+                  url="https://maps.es.govt.nz/server/rest/services/LiDAR/LiDAR_2021_2023_Southland_SLOPE/ImageServer/WMSServer"
+                  layers="0"
+                  format="image/png"
+                  transparent={true}
+                  opacity={config.opacity}
+                  zIndex={config.zIndex}
+                  attribution={config.attribution}
+                  maxZoom={config.maxZoom}
+                  minZoom={config.minZoom}
+                  bounds={config.bounds}
+                />
+              </LayersControl.Overlay>
+            );
+          }
+          
+          if (config.type === 'wms') {
+            // Skip rendering if auth is required but not available
+            if (config.requiresAuth && !hasAuth) return null;
+            
+            // Add auth token to URL if available
+            let url = config.url;
+            if (config.requiresAuth && hasAuth) {
+              // This is a simplified example - in a real app, you'd want to use proper OAuth flow
+              url = `${url}?token=${encodeURIComponent(credentials.clientId)}`;
+            }
+            
+            return (
+              <LayersControl.Overlay 
+                key={`overlay-${config.name}`}
+                name={config.name}
+                checked={false}
+              >
+                <WMSTileLayer
+                  url={url}
+                  layers={config.layers}
+                  format={config.format}
+                  transparent={config.transparent}
+                  opacity={config.opacity}
+                  zIndex={config.zIndex}
+                  attribution={config.attribution}
+                  maxZoom={config.maxZoom}
+                  minZoom={config.minZoom}
+                  bounds={config.bounds}
+                  eventHandlers={{
+                    loading: () => logLayerEvent('Loading', config.name),
+                    load: () => {
+                      logLayerEvent('Loaded', config.name);
+                      console.log(`WMS Layer loaded: ${config.name}`, config);
+                    },
+                    error: (error) => {
+                      logLayerEvent('Error', config.name, error);
+                      if (config.requiresAuth && !hasAuth) {
+                        setMapError(`Authentication required for ${config.name}. Please sign in.`);
+                      } else {
+                        setMapError(`Failed to load ${config.name}: ${error.message}`);
+                      }
+                    }
+                  }}
+                />
+              </LayersControl.Overlay>
+            );
+          }
+          
+          // Default to standard TileLayer for other layer types
+          return (
+            <LayersControl.Overlay 
+              key={`overlay-${config.name}`}
+              name={config.name}
+              checked={false}
+            >
+              <TileLayer
+                url={config.url}
+                attribution={config.attribution}
+                maxZoom={config.maxZoom}
+                minZoom={config.minZoom}
+                bounds={config.bounds}
+                opacity={config.opacity}
+                noWrap={true}
+                zIndex={config.zIndex}
+                eventHandlers={{
+                  loading: () => logLayerEvent('Loading', config.name),
+                  load: () => {
+                    logLayerEvent('Loaded', config.name);
+                    console.log(`Layer loaded: ${config.name}`, {
+                      url: config.url,
+                      bounds: config.bounds,
+                      opacity: config.opacity,
+                      zIndex: config.zIndex
+                    });
+                  },
+                  error: (error) => logLayerEvent('Error', config.name, error)
+                }}
+              />
+            </LayersControl.Overlay>
+          );
+        } catch (error) {
+          logLayerEvent('Render Error', config.name, error);
+          return null; // Skip this layer if there's an error
+        }
+      });
+    } catch (error) {
+      console.error('Error rendering overlay layers:', error);
+      return null;
+    }
+  };
+
   return (
-    <div style={{ height: '100%', width: '100%', minHeight: '500px' }}>
+    <AuthContext.Provider value={{ credentials, setCredentials }}>
+      <div className="map-container" style={{ height: '100%', width: '100%', position: 'relative' }}>
+        {hasAuthLayers && (
+          <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 1000, display: 'flex', gap: '8px' }}>
+            {hasAuth ? (
+              <Button 
+                variant="contained" 
+                color="primary" 
+                size="small"
+                onClick={handleLogout}
+              >
+                Logout
+              </Button>
+            ) : (
+              <Button 
+                variant="contained" 
+                color="primary" 
+                size="small"
+                onClick={() => setAuthOpen(true)}
+              >
+                Sign In for More Layers
+              </Button>
+            )}
+            <Tooltip title="Authentication Settings">
+              <IconButton 
+                onClick={() => setAuthOpen(true)}
+                size="small"
+                sx={{ backgroundColor: 'white', '&:hover': { backgroundColor: '#f5f5f5' } }}
+              >
+                <SettingsIcon />
+              </IconButton>
+            </Tooltip>
+          </div>
+        )}
+        
+        <AuthSettings
+          open={authOpen}
+          onClose={() => setAuthOpen(false)}
+          onSave={handleAuthSave}
+          initialCredentials={credentials || {}}
+        />
+      {mapError && (
+        <div style={{
+          position: 'absolute',
+          top: '10px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: 'rgba(255, 0, 0, 0.7)',
+          color: 'white',
+          padding: '10px',
+          borderRadius: '4px',
+          zIndex: 1000,
+          maxWidth: '80%',
+          textAlign: 'center'
+        }}>
+          Map Error: {mapError}
+          <button 
+            onClick={() => setMapError(null)}
+            style={{
+              marginLeft: '10px',
+              background: 'white',
+              border: 'none',
+              borderRadius: '3px',
+              padding: '2px 6px',
+              cursor: 'pointer'
+            }}
+          >
+            ×
+          </button>
+        </div>
+      )}
       <MapContainer
         center={defaultCenter}
         zoom={10}
         style={{ height: '100%', width: '100%' }}
         whenCreated={setMap}
-        zoomControl={true}
+        ref={mapRef}
       >
-      <FeatureGroup ref={featureGroupRef}>
-        <EditControl
-          position="topleft"
-          draw={drawOptions.draw}
-          edit={drawOptions.edit}
-          onCreated={handleCreated}
-        />
-      </FeatureGroup>
-      <PolygonSynchroniser polygon={polygon} />
-      {benefitRasterUrl && <BenefitRasterLayer url={benefitRasterUrl} />}
-      
-      {/* Add base layers */}
-      <LayersControl position="topright">
-        {Object.entries(baseLayers).map(([name, layer]) => (
-          <LayersControl.BaseLayer key={name} name={name}>
-            <TileLayer
-              url={layer._url}
-              attribution={layer.options.attribution}
-              maxZoom={layer.options.maxZoom}
-              bounds={layer.options.bounds}
-            />
-          </LayersControl.BaseLayer>
-        ))}
-        
-        {/* Add overlay layers */}
-        {Object.entries(overlayLayers).map(([name, layer]) => (
-          <LayersControl.Overlay key={name} name={name}>
-            <TileLayer
-              url={layer._url}
-              attribution={layer.options.attribution}
-              maxZoom={layer.options.maxZoom}
-              minZoom={layer.options.minZoom}
-              bounds={layer.options.bounds}
-            />
-          </LayersControl.Overlay>
-        ))}
-      </LayersControl>
+        <LayersControl position="topright" ref={layerControlRef}>
+          {/* Base Layers */}
+          {Object.entries(baseLayerConfigs).map(([name, config]) => (
+            <LayersControl.BaseLayer 
+              key={`base-${name}`} 
+              name={name}
+              checked={name === 'ESRI World Imagery'}
+            >
+              <TileLayer
+                url={config.url}
+                attribution={config.attribution}
+                maxZoom={config.maxZoom}
+                bounds={config.bounds}
+              />
+            </LayersControl.BaseLayer>
+          ))}
+          
+          {/* Overlay Layers */}
+          {renderOverlayLayers()}
+        </LayersControl>
+
+        {/* Drawing Tools */}
+        <FeatureGroup ref={featureGroupRef}>
+          <EditControl
+            position="topleft"
+            draw={drawOptions.draw}
+            edit={drawOptions.edit}
+            onCreated={handleCreated}
+          />
+        </FeatureGroup>
+
+        {/* Additional Components */}
+        <PolygonSynchroniser polygon={polygon} />
+        {benefitRasterUrl && <BenefitRasterLayer url={benefitRasterUrl} />}
       </MapContainer>
-    </div>
+      </div>
+    </AuthContext.Provider>
   );
 }
 
