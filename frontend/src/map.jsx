@@ -200,6 +200,15 @@ export const AuthContext = createContext({
 });
 
 function MapPanel({ polygon, onPolygonChange, benefitRasterUrl }) {
+  // Header image
+  const headerStyle = {
+    width: '100%',
+    height: '200px',
+    objectFit: 'cover',
+    marginBottom: '1rem',
+    borderRadius: '4px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+  };
   const [authOpen, setAuthOpen] = useState(false);
   const [credentials, setCredentials] = useState(() => {
     // Load saved credentials from localStorage
